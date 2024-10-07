@@ -1,75 +1,77 @@
 import requests
 import json
-from datetime import datetime, timedelta
 import os
-from permanents import API_URL, LATITUDE, LONGITUDE, CACHE_FILE
+from datetime import datetime, timedelta
 
 
-def get_weather_data(date):
-    params = {
-        "latitude": LATITUDE,
-        "longitude": LONGITUDE,
-        "hourly": "rain",
-        "daily": "rain_sum",
-        "timezone": "Europe/London",
-        "start_date": date,
-        "end_date": date
-    }
+class WeatherForecast:
+    def __init__(self, cache_file='weather_cache.json', latitude="51.7592", longitude="19.4560"):
+        self.cache_file = cache_file
+        self.latitude = latitude
+        self.longitude = longitude
+        self.cache = self._read_cache()
 
-    response = requests.get(API_URL, params=params)
-
-    if response.status_code == 200:
-        data = response.json()
-        if "daily" in data and "rain_sum" in data["daily"] and len(data["daily"]["rain_sum"]) > 0:
-            rain_sum = data["daily"]["rain_sum"][0]
-            return rain_sum
-        else:
-            return None
-    else:
-        return None
-
-
-def check_rain(date):
-    rain_sum = get_weather_data(date)
-
-    if rain_sum is None:
-        return "I don't know"
-    elif rain_sum > 0.0:
-        return "It's gonna rain"
-    elif rain_sum == 0.0:
-        return "It's not gonna rain"
-    else:
-        return "I don't know"
-
-
-def read_cache():
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, "r") as file:
-            return json.load(file)
-    else:
+    def _read_cache(self):
+        if os.path.exists(self.cache_file):
+            with open(self.cache_file, 'r') as file:
+                return json.load(file)
         return {}
 
+    def _write_cache(self):
+        with open(self.cache_file, 'w') as file:
+            json.dump(self.cache, file, indent=4)
 
-def write_cache(cache):
-    with open(CACHE_FILE, "w") as file:
-        json.dump(cache, file, indent=4)
+    def _fetch_weather(self, date):
+        url = (f"https://api.open-meteo.com/v1/forecast?"
+               f"latitude={self.latitude}&longitude={self.longitude}&"
+               f"hourly=rain&daily=rain_sum&timezone=Europe%2FLondon&"
+               f"start_date={date}&end_date={date}")
+
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            rain_sum = data['daily']['rain_sum']
+            if rain_sum:
+                return rain_sum[0]
+        return None
+
+    def __getitem__(self, item):
+        if item not in self.cache:
+            rain_sum = self._fetch_weather(item)
+            if rain_sum is None:
+                self.cache[item] = "I don't know"
+            elif rain_sum > 0:
+                self.cache[item] = "It's gonna rain"
+            else:
+                self.cache[item] = "It's not gonna rain"
+            self._write_cache()
+        return self.cache[item]
+
+    def __setitem__(self, date, weather):
+        self.cache[date] = weather
+        self._write_cache()
+
+    def __iter__(self):
+        return iter(self.cache)
+
+    def items(self):
+        return self.cache.items()
 
 
 def main():
-    user_input = input("Input date (YYYY-mm-dd), Enter- for choice tomorrow: ")
+    weather_forecast = WeatherForecast()
 
-    if user_input.strip() == "":
-        date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-    else:
-        date = user_input.strip()
+    date_input = input("Input date (YYYY-mm-dd), Enter- for choice tomorrow: ")
+    if not date_input:
+        date_input = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
 
-    cache = read_cache()
+    weather = weather_forecast[date_input]
+    print(f"Weather on day {date_input}: {weather}")
 
-    if date in cache:
-        print(f"Info from file: {cache[date]}")
-    else:
-        result = check_rain(date)
-        print(f"Result: {result}")
+    print("\nInfo from file:")
+    for date, weather in weather_forecast.items():
+        print(f"{date}: {weather}")
 
-        cache[date] = result
-        write_cache(cache)
+
+if __name__ == '__main__':
+    main()
